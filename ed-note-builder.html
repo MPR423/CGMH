@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>ED Note Builder</title>
+<style>
+/* ============================================================
+   以下是「樣式表」CSS，負責畫面的顏色、間距、排版等外觀。
+   不會影響資料或按鈕的功能邏輯，可以放心跳過，
+   真正決定「有哪些主訴、哪些按鈕」的內容在下面 <script> 區塊裡的 COMPLAINTS。
+   ============================================================ */
+
+/* :root 這裡定義一整組顏色變數，之後每個樣式都用 var(--xxx) 來引用，
+   好處是以後想換配色，只要改這裡幾行就好，不用整份檔案找顏色代碼 */
+:root{
+  --paper:#E4EAE7;
+  --surface:#FBFCFB;
+  --surface-sunk:#F1F5F3;
+  --ink:#16201C;
+  --muted:#67736D;
+  --rule:#C6D0CB;
+  --rule-soft:#DDE4E1;
+  --accent:#0E5A4E;
+  --accent-soft:#D6E6E1;
+  --flag:#9A5A12;
+  --flag-soft:#F3E3CE;
+  --surg:#7A2E1D;
+  --surg-soft:#F0DCD6;
+  --ui: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, "Noto Sans TC", sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, "Liberation Mono", monospace;
+}
+
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--ui); font-size:14px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;}
+
+/* ---------- shell：最上方的黑色標題列 ---------- */
+.masthead{
+  display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+  padding:10px 18px; background:var(--ink); color:#E4EAE7;
+  border-bottom:3px solid var(--accent);
+}
+.masthead h1{
+  margin:0; font-size:13px; font-weight:650;
+  letter-spacing:.16em; text-transform:uppercase;
+}
+.masthead .sub{font-size:11px; color:#8FA39B; letter-spacing:.05em;}
+.masthead .spacer{flex:1;}
+.masthead .keyhint{font-size:11px; color:#8FA39B; font-family:var(--mono);}
+.masthead .keyhint kbd{
+  background:#2C3833; border:1px solid #3E4C46; border-radius:2px;
+  padding:1px 4px; color:#C4D2CC; font-family:inherit; font-size:10px;
+}
+
+.privacy{
+  padding:6px 18px; background:var(--flag-soft); color:#6B3E07;
+  font-size:11.5px; border-bottom:1px solid #E0CBAA;
+}
+
+/* ---------- dept + complaint strip：科別頁籤（外科/內科）與主訴頁籤那一整排 ---------- */
+.navrow{
+  display:flex; align-items:stretch; background:var(--surface);
+  border-bottom:1px solid var(--rule);
+}
+.dept{
+  display:flex; flex-shrink:0; border-right:2px solid var(--rule);
+}
+.dept button{
+  appearance:none; border:0; cursor:pointer;
+  padding:9px 15px; font-size:12.5px; font-weight:650;
+  letter-spacing:.04em; background:var(--surface-sunk); color:var(--muted);
+  border-bottom:3px solid transparent;
+}
+.dept button[data-d="surg"][aria-selected="true"]{
+  background:var(--surg-soft); color:var(--surg); border-bottom-color:var(--surg);
+}
+.dept button[data-d="med"][aria-selected="true"]{
+  background:var(--accent-soft); color:var(--accent); border-bottom-color:var(--accent);
+}
+.dept button:hover{color:var(--ink);}
+
+.strip{
+  display:flex; gap:0; overflow-x:auto; flex:1;
+}
+.strip button{
+  appearance:none; background:transparent; border:0;
+  border-right:1px solid var(--rule-soft); border-bottom:3px solid transparent;
+  padding:9px 15px; font-size:13px; color:var(--muted);
+  cursor:pointer; white-space:nowrap; font-weight:500;
+}
+.strip button:hover{background:var(--surface-sunk); color:var(--ink);}
+.strip button[aria-selected="true"]{
+  color:var(--accent); border-bottom-color:var(--accent);
+  background:var(--surface); font-weight:650;
+}
+body[data-dept="surg"] .strip button[aria-selected="true"]{
+  color:var(--surg); border-bottom-color:var(--surg);
+}
+.strip button .alt{font-family:var(--mono); font-size:10px; opacity:.55; margin-right:6px;}
+
+/* ---------- main grid：整個工作區分成三欄 = 左側細長導覽條 / 中間填寫表單 / 右側病歷預覽 ---------- */
+.workspace{
+  display:grid; grid-template-columns:26px minmax(0,1fr) minmax(380px,42%);
+  height:calc(100vh - 146px);
+}
+
+/* section completeness rail：最左邊那條細細的「完成度」導覽列，
+   哪個區塊填過內容，對應的小方塊就會變深色，點下去可以跳到那個區塊 */
+.rail{
+  background:var(--surface-sunk); border-right:1px solid var(--rule);
+  display:flex; flex-direction:column; align-items:center;
+  padding-top:14px; gap:3px;
+}
+.rail button{
+  appearance:none; border:0; padding:0; cursor:pointer;
+  width:8px; height:26px; background:var(--rule);
+  border-radius:1px; position:relative;
+}
+.rail button:hover{background:var(--muted);}
+.rail button[data-filled="true"]{background:var(--accent);}
+.rail button::after{
+  content:attr(data-tip); position:absolute; left:16px; top:2px;
+  background:var(--ink); color:#E4EAE7; font-size:10.5px;
+  padding:2px 6px; border-radius:2px; white-space:nowrap;
+  opacity:0; pointer-events:none; transition:opacity .12s; z-index:20;
+  letter-spacing:.04em;
+}
+.rail button:hover::after{opacity:1;}
+.rail .railcap{
+  margin-top:10px; font-size:9px; color:var(--muted);
+  writing-mode:vertical-rl; letter-spacing:.14em; text-transform:uppercase;
+}
+
+/* ---------- editor pane：中間可以捲動的表單填寫區 ---------- */
+.editor{overflow-y:auto; padding:0 20px 120px;}
+.block{border-bottom:1px solid var(--rule-soft); padding:14px 0;}
+.block:last-child{border-bottom:0;}
+.block > h2{
+  margin:0 0 9px; font-size:10.5px; font-weight:700;
+  letter-spacing:.15em; text-transform:uppercase; color:var(--muted);
+  display:flex; align-items:center; gap:8px;
+}
+.block > h2::after{content:""; flex:1; height:1px; background:var(--rule-soft);}
+
+.grp{margin-bottom:9px; display:flex; align-items:flex-start; gap:10px;}
+.grp > .gl{
+  flex:0 0 108px; padding-top:4px; font-size:11px; color:var(--muted);
+  text-align:right; letter-spacing:.02em;
+}
+.grp > .gb{flex:1; display:flex; flex-wrap:wrap; gap:4px; align-items:center;}
+.gfree{
+  flex:1 1 130px; min-width:110px;
+  font-family:var(--ui); font-size:12px; color:var(--ink);
+  background:transparent; border:0; border-bottom:1px dashed var(--rule);
+  padding:4px 4px 3px; border-radius:0;
+}
+.gfree::placeholder{color:#9AA8A1; font-style:italic;}
+.gfree:focus{outline:none; border-bottom:1px solid var(--accent);}
+
+/* .chip 就是畫面上那些可以點擊切換的小按鈕（藥物、症狀選項等都是用它） */
+.chip{
+  appearance:none; cursor:pointer;
+  background:var(--surface); border:1px solid var(--rule);
+  color:var(--ink); border-radius:3px;
+  padding:4px 9px; font-size:12.5px; line-height:1.3;
+}
+.chip:hover{border-color:var(--accent); background:var(--accent-soft);}
+.chip[aria-pressed="true"]{
+  background:var(--accent); border-color:var(--accent);
+  color:#F4F8F6; font-weight:550;
+}
+.chip.flag{border-color:#D9BE94; background:var(--flag-soft); color:var(--flag);}
+.chip.flag:hover{border-color:var(--flag);}
+.chip.flag[aria-pressed="true"]{background:var(--flag); border-color:var(--flag); color:#FBF6EF;}
+.chip:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+
+/* free text + numeric */
+textarea, input[type=text], input[type=number]{
+  font-family:var(--ui); font-size:13px; color:var(--ink);
+  background:var(--surface); border:1px solid var(--rule);
+  border-radius:3px; padding:6px 8px; width:100%;
+}
+textarea{resize:vertical; min-height:52px; line-height:1.5;}
+textarea:focus, input[type=text]:focus, input[type=number]:focus{outline:2px solid var(--accent); outline-offset:-1px; border-color:var(--accent);}
+
+/* PE rows */
+.pe{display:flex; align-items:flex-start; gap:10px; padding:3px 0;}
+.pe > .pl{
+  flex:0 0 108px; padding-top:4px; text-align:right;
+  font-size:11.5px; font-weight:600; color:var(--ink);
+}
+.pe > .pb{flex:1; display:flex; flex-wrap:wrap; gap:4px; align-items:center;}
+.chip.norm{font-weight:550;}
+
+.hint{font-size:11.5px; color:var(--muted); margin:-3px 0 9px;}
+
+/* ---------- preview pane：右側黑底的病歷文字預覽區，跟複製/清除按鈕 ---------- */
+.preview{
+  background:var(--ink); color:#D8E2DD;
+  display:flex; flex-direction:column; border-left:1px solid #000;
+}
+.pvhead{
+  display:flex; align-items:center; gap:10px;
+  padding:8px 14px; border-bottom:1px solid #2B3833; flex-shrink:0;
+}
+.pvhead .t{font-size:10.5px; letter-spacing:.15em; text-transform:uppercase; color:#8FA39B; font-weight:650;}
+.pvhead .spacer{flex:1;}
+.pvhead .count{font-family:var(--mono); font-size:11px; color:#6E8078;}
+
+.pvbody{
+  flex:1; overflow-y:auto; padding:14px;
+  font-family:var(--mono); font-size:12.5px; line-height:1.62;
+  white-space:pre-wrap; word-break:break-word;
+}
+.pvbody .sec{color:#5FBFA8; font-weight:700;}
+.pvbody .empty{color:#4C5B55; font-style:italic;}
+
+.pvfoot{
+  display:flex; gap:8px; padding:10px 14px;
+  border-top:1px solid #2B3833; flex-shrink:0;
+}
+.act{
+  appearance:none; cursor:pointer; border-radius:3px;
+  font-size:13px; font-weight:600; padding:9px 14px;
+}
+.act.primary{flex:1; background:var(--accent); border:1px solid #14705F; color:#F2F9F6;}
+.act.primary:hover{background:#137464;}
+.act.ghost{background:transparent; border:1px solid #3B4A44; color:#8FA39B;}
+.act.ghost:hover{border-color:#5D6F68; color:#C4D2CC;}
+.act:focus-visible{outline:2px solid #5FBFA8; outline-offset:2px;}
+.act.primary.done{background:#1E7F6C;}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation:none !important; transition:none !important;}
+}
+@media (max-width:1000px){
+  .workspace{grid-template-columns:1fr; height:auto;}
+  .rail{display:none;}
+  .preview{height:70vh; position:sticky; bottom:0;}
+}
+</style>
+</head>
+<body data-dept="surg">
+<!-- 這裡開始是畫面實際看到的內容（HTML）。
+     真正的按鈕文字、選項清單並不是寫死在這裡，
+     而是由下面 <script> 裡的資料，用 JavaScript 動態產生出來的，
+     所以這段 HTML 本身很短。 -->
+
+<!-- 最上方黑色標題列 -->
+<header class="masthead">
+  <h1>ED Note Builder</h1>
+  <span class="spacer"></span>
+  <span class="keyhint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> copy &nbsp; <kbd>Alt</kbd>+<kbd>1-9</kbd> switch &nbsp; <kbd>Ctrl</kbd>+<kbd>Backspace</kbd> clear</span>
+</header>
+
+
+<!-- 科別頁籤（外科/內科）固定寫死在這裡；
+     但右邊的主訴頁籤 #strip 是空的 <nav>，會由 JS 的 renderStrip() 依科別動態塞入按鈕 -->
+<div class="navrow">
+  <div class="dept" id="dept" role="tablist" aria-label="Department">
+    <button data-d="surg" role="tab">外科 Trauma</button>
+    <button data-d="med" role="tab">內科 Medical</button>
+  </div>
+  <nav class="strip" id="strip" role="tablist" aria-label="Chief complaint"></nav>
+</div>
+
+<!-- 三欄工作區：以下三個都是空殼，內容全部由 JS 的 renderRail() / renderEditor() / renderPreview() 動態填入 -->
+<div class="workspace">
+  <nav class="rail" id="rail" aria-label="Jump to section"></nav>
+  <main class="editor" id="editor"></main>
+  <section class="preview" aria-label="Generated note">
+    <div class="pvhead">
+      <span class="t">Note preview</span>
+      <span class="spacer"></span>
+      <span class="count" id="count">0 words</span>
+    </div>
+    <div class="pvbody" id="pvbody"></div>
+    <div class="pvfoot">
+      <button class="act primary" id="copyBtn">Copy note</button>
+      <button class="act ghost" id="clearBtn">Clear all</button>
+    </div>
+  </section>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   TEMPLATES 樣板資料區
+   =================================================================
+   以下到 const COMPLAINTS 結束為止，是整個網站「內容」的來源。
+   你平常想新增/修改主訴、按鈕選項，只需要動這個區塊，
+   完全不用碰後面的程式邏輯（那些負責畫面渲染、產生病歷文字，
+   寫好之後不太需要再改）。
+
+   dept: "surg" 或 "med"，決定這個主訴出現在外科還是內科的頁籤下。
+
+   hpi 陣列裡每一個 { label:"...", b:[...] } 都是「現病史」的一組按鈕，
+   label 是這組的標題（例如 "Mechanism"、"Head"），
+   b 是這組裡面可以點擊的按鈕文字清單，
+   free:true 表示這組旁邊還會多一個自由輸入框，
+   ph 則是那個輸入框的提示文字 (placeholder)。
+
+   病歷文字產生出來的樣子會是條列式：
+     - Label : 按鈕文字, 按鈕文字, 自由輸入的文字
+     - Denied : 勾選的「否認」項目
+   ============================================================ */
+
+/* PE_SYSTEMS：理學檢查（身體診察）預設的十大身體系統清單，
+   每個系統有一句 normal（正常時要寫的敘述）跟一串 abn（異常時可點選的選項），
+   點「normal」會自動清掉之前選的異常項目，反之亦然，兩者互斥 */
+const PE_SYSTEMS = [
+  { key:"general", label:"General",
+    normal:"alert, no acute distress",
+    abn:["ill-looking","drowsy","agitated","in obvious pain"] },
+  { key:"heent", label:"HEENT",
+    normal:"pupils with prompt light reflex, conjunctiva not pale, sclera not icteric",
+    abn:["pale conjunctiva","icteric sclera","anisocoria","dry oral mucosa","injected throat with tonsil enlargement"] },
+  { key:"neck", label:"Neck",
+    normal:"supple, no jugular vein engorgement, no lymphadenopathy, trachea midline",
+    abn:["neck stiffness","midline cervical tenderness","jugular vein engorgement","palpable cervical lymphadenopathy"] },
+  { key:"chest", label:"Chest",
+    normal:"symmetric expansion, bilateral clear breath sounds",
+    abn:["rales over right lower lung field","rales over left lower lung field","bilateral coarse breath sounds","expiratory wheezing","decreased breath sounds, right","decreased breath sounds, left","chest wall tenderness","paradoxical chest movement","subcutaneous emphysema"] },
+  { key:"heart", label:"Heart",
+    normal:"regular heart beat, no murmur",
+    abn:["irregularly irregular heart beat","tachycardia","systolic murmur","distant heart sounds"] },
+  { key:"abdomen", label:"Abdomen",
+    normal:"soft and flat, normoactive bowel sounds, no tenderness, no rebound tenderness, no muscle guarding",
+    abn:["epigastric tenderness","RUQ tenderness","RLQ tenderness","LLQ tenderness","diffuse tenderness","rebound tenderness","muscle guarding","positive Murphy's sign","tenderness at McBurney's point","distended","hypoactive bowel sounds","hyperactive bowel sounds","seat-belt sign"] },
+  { key:"back", label:"Back / Pelvis",
+    normal:"no costovertebral angle knocking tenderness, pelvic compression stable",
+    abn:["right CV angle knocking tenderness","left CV angle knocking tenderness","lumbar spine tenderness","pelvic compression tenderness","pelvic instability"] },
+  { key:"ext", label:"Extremities",
+    normal:"freely movable, no deformity, peripheral pulses palpable, capillary refill under 2 seconds",
+    abn:["local tenderness","swelling","ecchymosis","deformity","limited range of motion","unable to bear weight","open wound","distal pulse impaired","bilateral pitting edema","calf tenderness with unilateral swelling"] },
+  { key:"skin", label:"Skin",
+    normal:"warm and dry, no rash, no petechiae",
+    abn:["diaphoretic","multiple abrasions","contusion","generalized rash","petechiae","pallor","cyanosis"] },
+  { key:"neuro", label:"Neuro",
+    normal:"consciousness clear, cranial nerves grossly intact, muscle power full in four limbs, no focal deficit",
+    abn:["drowsy but arousable","confused and disoriented","right hemiparesis","left hemiparesis","slurred speech","facial palsy","positive Babinski sign","unsteady gait","sensory deficit"] }
+];
+
+/* SHARED：跨所有主訴共用的選項清單，例如藥物史、破傷風。
+   目前只有外科主訴（dept:"surg"）才會顯示 Tetanus 那組按鈕 */
+const SHARED = {
+  meds:[
+    { t:"on antiplatelet", flag:true },
+    { t:"on anticoagulation", flag:true },
+    { t:"no antiplatelet or anticoagulation", flag:false }
+  ],
+  tetanus:["nil","within 5 years","over 5 years"]
+};
+
+/* --- shared trauma HPI groups：外傷類主訴共用的「受傷機轉/防護/車速」三組按鈕，
+   寫成獨立變數是因為好幾個外科主訴都會重複用到，改一次全部套用 --- */
+const TRAUMA_MECH = { label:"Mechanism", free:true,
+  b:["Car", "Motorcycle","Bicycle","pedestrian struck by vehicle","fall from own height","fall from height","struck by object","assault"],
+  ph:"time / detail, e.g. at 14:30, rider" };
+const TRAUMA_PROT = { label:"Protection",
+  b:["with helmet","without helmet","with seatbelt","without seatbelt","airbag deployed"] };
+const TRAUMA_SPEED = { label:"Speed", free:true,
+  b:["low speed (<30 km/h)","moderate (30\u201360 km/h)","high speed (>60 km/h)","speed unknown"],
+  ph:"e.g. about 60 km/h" };
+
+/* COMPLAINTS：每一個主訴（頁籤）的完整設定都在這個大物件裡，
+   物件的「key」（例如 trauma、laceration）就是程式內部用的代號，
+   跟畫面顯示無關，畫面顯示的文字是 label。
+
+   每個主訴可以用到的欄位說明：
+     dept        "surg" 外科 或 "med" 內科
+     label       頁籤上顯示的名稱
+     ccDefault   Chief complaint 欄位的預設提示文字
+     laterality  true 的話，Chief complaint 上方會多出 OU/OD/OS（雙眼/右眼/左眼）按鈕（目前只有 ocular_injury 有用到）
+     hpi         現病史的按鈕分組，見上方 TEMPLATES 說明
+     negatives   「Denied 否認」那排按鈕的選項清單
+     gcs         true 的話，理學檢查區會多出 GCS（E/V/M）評分按鈕
+     phExtra     過去病史區塊要額外加的按鈕分組（目前 ocular_injury 用來放「過去眼科病史」）
+     peExtra     理學檢查區塊額外加的分組（例如 ocular_injury 的 Eye exam、trauma 的 Skull base）
+     peFocus     理學檢查系統要優先排在前面顯示的身體系統（不影響全部顯示與否，只影響順序）
+     peSystems   設成 false 才會「完全不顯示」PE_SYSTEMS 那十大身體系統，只顯示 peExtra
+                 （目前只有 ocular_injury 用 false，因為眼科只需要 Eye exam 那組）
+*/
+const COMPLAINTS = {
+
+  /* ================= 外科 TRAUMA ================= */
+
+  trauma:{
+    dept:"surg", label:"Trauma",
+    ccDefault:"Trauma after ...",
+    hpi:[
+      TRAUMA_MECH, TRAUMA_PROT, TRAUMA_SPEED,
+      { label:"Head", free:true,
+        b:["Denied head trauma", "nausea","vomiting","retrograde amnesia > 30 min","otorrhea & rhinorrhea", "battle sign & raccoon sign"],
+        ph:"detail" },
+      { label:"Neck", free:true,
+        b:["No midline cervical spine tenderness","No delayed onset of neck pain","ambulatory since injury","sitting position in ED","able to actively rotate neck 45° bilaterally"],
+        ph:"detail" },
+      { label:"Trunk", free:true,
+        b:["chest pain","dyspnea","abdominal pain","pelvic pain","backache","hematuria"],
+        ph:"detail" },
+      { label:"Limb", free:true,
+        b:["pain","swelling", "bruise over", "open wound","active bleeding","deformity","limited ROM","ROM full","numbness or weakness", "unable weight bearing"],
+        ph:"site / detail" }
+    ],
+    
+    gcs:true,
+    peExtra:[
+      { label:"Local findings", free:true,
+        b:["scalp laceration","scalp hematoma","facial abrasion","periorbital swelling","abrasions","contusions","laceration","open fracture suspected","road rash"],
+        ph:"site / size" },
+      { label:"Skull base", flag:true,
+        b:["raccoon eyes","Battle's sign","otorrhea","rhinorrhea","no sign of basal skull fracture"] }
+    ],
+    peFocus:["general","heent","neck","chest","abdomen","back","ext","skin","neuro"]
+  },
+
+  /* pediatric_head_injury：兒童頭部外傷，症狀選項根據 PECARN 兒童輕微頭部外傷準則設計 */
+  pediatric_head_injury:{
+    dept:"surg", label:"Pediatric head injury",
+    ccDefault:"Head injury",
+    hpi:[
+      TRAUMA_PROT,
+      { label:"Mechanism", free:true,
+        b:["MVC with rollover, ejection, or fatality of another passenger","pedestrian or unhelmeted bicyclist struck by vehicle","fall > 0.9 m (<2y) / > 1.5 m (≥2y)","fall from own height","head struck by high-impact object"],
+        ph:"time / detail" },
+      { label:"Mental status", free:true,
+        b:["not acting normally per caregiver","agitation","irritability","somnolence","repetitive questioning","slow response to verbal communication","poor feeding"],
+        ph:"detail" },
+      { label:"Symptoms", free:true,
+        b:["loss of consciousness ≥ 5 sec","vomiting","severe headache","seizure after injury"],
+        ph:"detail" },
+      { label:"Red flags", flag:true,
+        b:["palpable skull fracture","non-frontal scalp hematoma (occipital / parietal / temporal)","signs of basilar skull fracture"] }
+    ],
+    negatives:["loss of consciousness","vomiting","severe headache","irritability","poor feeding","seizure"],
+    gcs:true,
+    peExtra:[
+      { label:"Local findings", free:true,
+        b:["frontal scalp hematoma","parietal scalp hematoma","temporal scalp hematoma","occipital scalp hematoma","scalp laceration","no scalp hematoma"],
+        ph:"site / size" },
+      { label:"Fontanelle",
+        b:["anterior fontanelle flat and soft","bulging fontanelle","sunken fontanelle"] },
+      { label:"Skull base", flag:true,
+        b:["raccoon eyes","Battle's sign","otorrhea","rhinorrhea","no sign of basal skull fracture"] }
+    ],
+    peFocus:["general","heent","neuro","ext","skin"]
+  },
+
+  laceration:{
+    dept:"surg", label:"Laceration",
+    ccDefault:"Laceration wound",
+    hpi:[
+      { label:"Mechanism", free:true,
+        b:["cut by","bite by"],
+        ph:"time / detail" },
+      { label:"Site & size", free:true,
+        b:["scalp","face", "lip","arm","forearm", "hand" ,"finger","thigh","calf","foot","toe"],
+        ph:"e.g. about 3 cm, dorsal aspect" },
+      { label:"Wound",
+        b:["clean-cut edge","irregular edge","contaminated wound","active bleeding on arrival","bleeding stopped by compression","foreign body suspected"] }
+    ],
+    negatives:["numbness distal to wound","limited movement of involved part","foreign body sensation","other injury"],
+    peExtra:[
+      { label:"Wound exam", free:true,
+        b:["distal sensation intact","distal motor intact","distal circulation intact","tendon exposure","bone exposure","no foreign body seen in wound"],
+        ph:"depth / other findings" }
+    ],
+    peFocus:["general","ext","skin"]
+  },
+
+  limb_injury:{
+    dept:"surg", label:"Limb injury",
+    ccDefault:"Limb injury",
+    hpi:[
+      { label:"Mechanism", free:true,
+        b:["fall","twisted / sprained","direct blow","sports injury","crush injury","traffic accident"],
+        ph:"time / detail" },
+      { label:"Site", free:true,
+        b:["right","left","shoulder","elbow","wrist","hand","finger","hip","knee","ankle","foot","toe"],
+        ph:"" },
+      { label:"Symptoms",
+        b:["pain","swelling","ecchymosis","deformity","limited range of motion","unable to bear weight","joint locking sensation"] }
+    ],
+    negatives:["open wound","numbness","cold or pale distal limb","other injury","previous injury or operation at the same site"],
+    peExtra:[
+      { label:"Local exam", free:true,
+        b:["local tenderness","swelling","deformity","limited ROM due to pain","distal pulse intact","distal sensation intact","distal motor intact"],
+        ph:"site detail" }
+    ],
+    peFocus:["general","ext","skin"]
+  },
+
+  /* burn：燒燙傷，症狀與理學檢查選項根據 ATLS 燒傷評估原則設計（機轉、吸入性損傷徵象、燒傷深度、% TBSA） */
+  burn:{
+    dept:"surg", label:"Burn injury",
+    ccDefault:"Burn injury",
+    hpi:[
+      { label:"Mechanism", free:true,
+        b:["flame burn","scald burn","contact burn","chemical burn","electrical burn","flash burn"],
+        ph:"time / detail, e.g. agent, voltage" },
+      { label:"First aid", free:true,
+        b:["cooled with running water","wound covered","no first aid given"],
+        ph:"detail" },
+      { label:"Associated symptoms", free:true,
+        b:["pain","dyspnea","cough","hoarseness"],
+        ph:"detail" },
+      { label:"Red flags", flag:true,
+        b:["closed space fire exposure","explosion","facial burns","singed nasal hair","carbonaceous sputum","stridor","high-voltage electrical injury"] }
+    ],
+    negatives:["loss of consciousness","dyspnea","hoarseness","other associated trauma"],
+    peExtra:[
+      { label:"Burn depth", free:true,
+        b:["superficial (1st degree)","superficial partial-thickness","deep partial-thickness","full-thickness (3rd degree)"],
+        ph:"site" },
+      { label:"% TBSA", free:true, b:[], ph:"estimated % TBSA, Rule of Nines" },
+      { label:"Airway exam", flag:true,
+        b:["singed facial / nasal hair","soot in oropharynx","facial edema","stridor"] },
+      { label:"Circulation exam", flag:true,
+        b:["circumferential burn","distal pulse impaired","compartment concern"] }
+    ],
+    peFocus:["general","heent","chest","ext","skin"]
+  },
+
+  ocular_injury:{
+    dept:"surg", label:"Ocular injury",
+    ccDefault:"Eye injury",
+    laterality:true,
+    hpi:[
+      { label:"Mechanism", free:true,
+        b:["blunt trauma","penetrating injury","chemical splash", "thermal"],
+        ph:"time and detail, e.g. metal grinding without goggles" },
+      { label:"Symptoms", free:true,
+        b:["ophthalmalgia","blurred vision","decreased VA","redness","photophobia","double vision","floaters","flashes of light","foreign body sensation","headache", "other facial injury"],
+        ph:"laterality / detail" },
+      { label:"Red flags", flag:true,
+        b:["chemical exposure","penetrating injury suspected","sudden vision loss","on antiplatelet agent","on anticoagulant"] }
+    ],
+    phExtra:[
+      { label:"Previous ocular history",
+        b:["cataract surgery","LASIK","glaucoma","RD","high myopia","prior ocular trauma","no known ocular disease"] }
+    ],
+    peExtra:[
+      { label:"Eye exam", free:true,
+        b:["visual acuity grossly intact","decreased visual acuity","pupils equal and reactive to light","sluggish pupil","conjunctival injection","subconjunctival hemorrhage","corneal abrasion","corneal foreign body","hyphema","periorbital swelling","eyelid laceration","EOM intact","limited extraocular movement"],
+        ph:"laterality / detail, e.g. right eye" }
+    ],
+    peSystems:false
+  },
+
+  /* ================= 內科 MEDICAL ================= */
+
+  chest_pain:{
+    dept:"med", label:"Chest pain",
+    ccDefault:"Chest pain",
+    hpi:[
+      { label:"Onset", free:true,
+        b:["sudden onset","gradual onset","during exertion","at rest","after emotional stress"],
+        ph:"time, e.g. 2 hours ago" },
+      { label:"Character",
+        b:["pressure-like","squeezing","sharp","stabbing","burning","tearing"] },
+      { label:"Radiation",
+        b:["to left arm","to jaw","to back","non-radiating"] },
+      { label:"Modifiers",
+        b:["worse on exertion","worse on deep inspiration","worse with position change","relieved by rest","relieved by NTG","not related to position or respiration"] },
+      { label:"Associated", free:true,
+        b:["cold sweating","dyspnea","nausea / vomiting","palpitation","near-syncope","epigastric discomfort"],
+        ph:"" }
+    ],
+    negatives:["fever","cough or sputum","leg swelling","recent long-haul travel or immobilization","trauma","similar episodes in the past"],
+    peFocus:["general","chest","heart","ext"]
+  },
+
+  abd_pain:{
+    dept:"med", label:"Abd pain",
+    ccDefault:"Abdominal pain",
+    hpi:[
+      { label:"Location",
+        b:["epigastric","RUQ","LUQ","periumbilical","RLQ","LLQ","suprapubic","diffuse"] },
+      { label:"Onset", free:true,
+        b:["sudden onset","gradual onset","postprandial","intermittent","progressively worsening"],
+        ph:"time" },
+      { label:"Character",
+        b:["colicky","dull and aching","sharp","cramping"] },
+      { label:"Migration",
+        b:["periumbilical to RLQ","no migration"] },
+      { label:"Associated", free:true,
+        b:["nausea / vomiting","diarrhea","constipation","poor appetite","abdominal fullness","tarry stool","hematochezia","dysuria","urinary frequency","fever"],
+        ph:"" }
+    ],
+    negatives:["fever or chills","chest pain","dyspnea","trauma","previous abdominal operation","possibility of pregnancy"],
+    peFocus:["general","abdomen","back","chest"]
+  },
+
+  dyspnea:{
+    dept:"med", label:"Dyspnea",
+    ccDefault:"Shortness of breath",
+    hpi:[
+      { label:"Onset", free:true,
+        b:["sudden onset","gradual over days","progressive over weeks","acute on chronic"],
+        ph:"time" },
+      { label:"Pattern",
+        b:["exertional","at rest","orthopnea","paroxysmal nocturnal dyspnea"] },
+      { label:"Cough",
+        b:["productive cough","dry cough","yellowish sputum","blood-tinged sputum"] },
+      { label:"Associated", free:true,
+        b:["fever","chest tightness","wheezing","bilateral leg swelling","palpitation","decreased urine output","general weakness"],
+        ph:"" }
+    ],
+    negatives:["chest pain","hemoptysis","recent immobilization or travel","choking or foreign body aspiration","sick contact"],
+    peFocus:["general","neck","chest","heart","ext"]
+  },
+
+  fever:{
+    dept:"med", label:"Fever",
+    ccDefault:"Fever",
+    hpi:[
+      { label:"Course", free:true,
+        b:["less than 1 day","2\u20133 days","about 1 week","more than 1 week"],
+        ph:"detail, e.g. up to 39.2\u00B0C" },
+      { label:"Pattern",
+        b:["with chills","with rigor","intermittent","persistent"] },
+      { label:"Localizing", free:true,
+        b:["sore throat","cough with sputum","rhinorrhea","dysuria and frequency","flank pain","diarrhea","abdominal pain","skin redness and swelling","headache","neck stiffness","joint pain"],
+        ph:"" },
+      { label:"Exposure",
+        b:["sick contact","recent travel","recent antibiotics use","indwelling catheter","no significant exposure"] }
+    ],
+    negatives:["chest pain","dyspnea","altered consciousness","rash","recent hospitalization"],
+    peFocus:["general","heent","neck","chest","heart","abdomen","back","skin","neuro"]
+  },
+
+  gen_med:{
+    dept:"med", label:"Other",
+    ccDefault:"",
+    hpi:[
+      { label:"Onset", free:true,
+        b:["sudden onset","gradual onset","progressive","intermittent"],
+        ph:"time" },
+      { label:"Course",
+        b:["persisted since onset","partially improved","progressively worsening","recurrent episodes"] },
+      { label:"Associated", free:true, b:[], ph:"free text" }
+    ],
+    negatives:["fever","chest pain","dyspnea","abdominal pain","trauma"],
+    peFocus:["general","heent","chest","heart","abdomen","ext","neuro"]
+  }
+};
+
+/* ============================================================
+   STATE + ENGINE 狀態與運算邏輯
+   =================================================================
+   從這裡開始就是「程式邏輯」了，平常不太需要改。
+   核心概念：畫面上所有勾選/輸入的內容都存在一個叫做 S 的物件裡（S = State 狀態），
+   使用者每點一次按鈕，就是在改 S 裡面的某個值，
+   改完之後馬上重新畫一次畫面（renderEditor/renderPreview/renderRail），
+   讓右邊的病歷預覽即時更新。
+   ============================================================ */
+
+let dept = "surg";                 // 目前選到的科別："surg" 或 "med"
+const deptKeys = d => Object.keys(COMPLAINTS).filter(k=>COMPLAINTS[k].dept===d); // 取出屬於某科別的所有主訴代號
+let active = deptKeys(dept)[0];    // 目前選到的主訴代號（預設該科別的第一個）
+let S = blankState();              // 目前這張病歷所有已經填寫的內容
+
+/* blankState()：產生一份「全部空白」的病歷資料，
+   換病人（按 Clear all）或切換主訴時都會呼叫這個函式重新歸零 */
+function blankState(){
+  return {
+    ccText:"", laterality:"", tetanus:"",
+    hpi:{}, hpiX:{}, hpiFree:"", negatives:new Set(),
+    phFree:"", meds:new Set(), phExtra:{}, phExtraX:{},
+    gcs:{E:"",V:"",M:""},
+    pe:{}, peExtra:{}, peExtraX:{},
+    impression:""
+  };
+}
+
+function joinList(arr, conj){
+  if(arr.length===0) return "";
+  if(arr.length===1) return arr[0];
+  if(arr.length===2) return arr[0]+" "+conj+" "+arr[1];
+  return arr.slice(0,-1).join(", ")+", "+conj+" "+arr[arr.length-1];
+}
+function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+
+/* buildNote()：這是「組出病歷文字」的核心函式。
+   讀取目前的狀態 S，依序組出 Chief Complaint / Present Illness / Past History /
+   Physical Examination / Impression 幾個段落，回傳一個陣列，
+   每個元素是 [段落標題, 段落內容]，內容是 null 就代表這段還沒填、不會顯示出來。
+   右側的病歷預覽跟複製功能，最終都是呼叫這個函式拿到文字內容。 */
+function buildNote(){
+  const C = COMPLAINTS[active];
+  const out = [];
+
+  /* Chief complaint */
+  const cc = (S.ccText || C.ccDefault || "").trim();
+  const latTag = (C.laterality && S.laterality) ? " (" + S.laterality + ")" : "";
+  out.push(["Chief Complaint:", cc ? cc + latTag + (/[.!?]$/.test(cc) ? "" : "") : null]);
+
+  /* Present illness — bullet style */
+  const lines = [];
+  (C.hpi||[]).forEach(g=>{
+    const picked = S.hpi[g.label]||[];
+    const x = (S.hpiX[g.label]||"").trim();
+    if(!picked.length && !x) return;
+    const parts=[...picked]; if(x) parts.push(x);
+    lines.push("- " + g.label + " : " + parts.join(", "));
+  });
+  if(S.negatives.size){
+    lines.push("- Denied : " + [...S.negatives].join(", "));
+  }
+  if(S.hpiFree.trim()){
+    S.hpiFree.trim().split("\n").forEach(l=>{ if(l.trim()) lines.push(l.trim()); });
+  }
+  out.push(["Present Illness:", lines.length ? lines.join("\n") : null]);
+
+  /* Past history */
+  const phLines = [];
+  if(S.meds.size) phLines.push("- Medication : " + [...S.meds].join(", "));
+  if(S.tetanus) phLines.push("- Tetanus : " + S.tetanus);
+  (C.phExtra||[]).forEach(g=>{
+    const picked = S.phExtra[g.label]||[];
+    const x = (S.phExtraX[g.label]||"").trim();
+    if(!picked.length && !x) return;
+    const parts=[...picked]; if(x) parts.push(x);
+    phLines.push("- " + g.label + " : " + parts.join(", "));
+  });
+  if(S.phFree.trim()) phLines.push("- Others : " + S.phFree.trim());
+  out.push(["Past History:", phLines.length ? phLines.join("\n") : null]);
+
+  /* Physical examination */
+  const peLines = [];
+
+  if(C.gcs && (S.gcs.E||S.gcs.V||S.gcs.M)){
+    const e=S.gcs.E||"?", vv=S.gcs.V||"?", m=S.gcs.M||"?";
+    const tot = (S.gcs.E&&S.gcs.V&&S.gcs.M) ? " (total " + (+S.gcs.E + +S.gcs.V + +S.gcs.M) + ")" : "";
+    peLines.push("- GCS : E" + e + "V" + vv + "M" + m + tot);
+  }
+
+  PE_SYSTEMS.forEach(sys=>{
+    const picked = S.pe[sys.key];
+    if(!picked || !picked.length) return;
+    peLines.push("- " + sys.label + " : " + joinList(picked, "and"));
+  });
+
+  (C.peExtra||[]).forEach(g=>{
+    const picked = S.peExtra[g.label]||[];
+    const x = (S.peExtraX[g.label]||"").trim();
+    if(!picked.length && !x) return;
+    const parts=[...picked]; if(x) parts.push(x);
+    peLines.push("- " + g.label + " : " + parts.join(", "));
+  });
+
+  out.push(["Physical Examination:", peLines.length ? peLines.join("\n") : null]);
+
+  /* Impression */
+  out.push(["Impression:", S.impression.trim() || null]);
+
+  return out;
+}
+
+function noteAsText(){
+  return buildNote()
+    .filter(([,body])=>body)
+    .map(([h,body])=> h + "\n" + body)
+    .join("\n\n") + "\n";
+}
+
+/* ============================================================
+   RENDER 畫面渲染
+   =================================================================
+   這一整段負責「把 S 裡的資料畫成畫面上看到的按鈕/輸入框」，
+   採取很單純的做法：每次資料一變，就把整個區塊的 HTML 清空重畫一次
+   （沒有用到 React/Vue 這類框架，純手工用 JavaScript 產生 DOM 元素）。
+   ============================================================ */
+
+const el = id=>document.getElementById(id); // 依 id 取得畫面上的元素，少打幾個字用的小工具
+
+/* hasContent()：檢查目前病歷是不是已經填了一些東西，
+   用來決定切換科別/主訴時要不要跳出「確定要切換嗎」的警告 */
+function hasContent(){
+  return Object.values(S.hpi).some(a=>a.length) || S.negatives.size>0 || !!S.hpiFree.trim()
+    || S.meds.size>0 || Object.values(S.gcs).some(x=>x)
+    || Object.values(S.pe).some(a=>a&&a.length) || !!S.impression.trim();
+}
+/* guarded()：包一層「確認」對話框再執行動作（例如切換主訴），
+   避免使用者不小心把打到一半的病歷清掉 */
+function guarded(fn){
+  if(hasContent() && !confirm("Switching resets the current note. Continue?")) return;
+  fn(); S = blankState(); renderAll(); el("editor").scrollTop = 0;
+}
+
+/* renderDept()：畫「外科/內科」那兩顆頁籤，並設定點擊事件 */
+function renderDept(){
+  document.body.dataset.dept = dept;
+  document.querySelectorAll("#dept button").forEach(b=>{
+    b.setAttribute("aria-selected", b.dataset.d===dept ? "true":"false");
+    b.onclick = ()=>{ if(b.dataset.d===dept) return; guarded(()=>{ dept=b.dataset.d; active=deptKeys(dept)[0]; }); };
+  });
+}
+
+/* renderStrip()：畫科別底下所有主訴的頁籤（例如外科的 Trauma / Laceration / ...） */
+function renderStrip(){
+  const s = el("strip"); s.innerHTML="";
+  deptKeys(dept).forEach((k,i)=>{
+    const b=document.createElement("button");
+    b.setAttribute("role","tab");
+    b.setAttribute("aria-selected", k===active ? "true":"false");
+    b.innerHTML = '<span class="alt">'+(i+1)+'</span>'+COMPLAINTS[k].label;
+    b.onclick=()=>{ if(k===active) return; guarded(()=>{ active=k; }); };
+    s.appendChild(b);
+  });
+}
+
+/* 以下 chip / toggleIn / block / group / freeInput 是共用的「小零件產生器」，
+   renderEditor() 會大量呼叫它們來組出整個表單畫面。 */
+
+/* chip()：畫一顆可以點擊切換的小按鈕。
+   label：按鈕文字；pressed：目前是不是已經被選取（會變深色）；
+   onclick：點下去時要更新哪個資料；isFlag：true 的話會用橘色的「警示」樣式 */
+function chip(label, pressed, onclick, isFlag){
+  const b=document.createElement("button");
+  b.className="chip"+(isFlag?" flag":"");
+  b.type="button";
+  b.setAttribute("aria-pressed", pressed?"true":"false");
+  b.textContent=label;
+  b.onclick=()=>{ onclick(); renderEditor(); renderPreview(); renderRail(); };
+  return b;
+}
+
+/* toggleIn()：多選用的小工具 —— 陣列裡有這個值就移除，沒有就加進去（點兩下=取消） */
+function toggleIn(container, val){
+  const i = container.indexOf(val);
+  if(i>=0) container.splice(i,1); else container.push(val);
+}
+
+/* block()：畫一個大區塊（例如「Present illness」整塊），帶一個標題文字 */
+function block(id, title){
+  const d=document.createElement("section");
+  d.className="block"; d.id="blk-"+id;
+  const h=document.createElement("h2"); h.textContent=title;
+  d.appendChild(h);
+  return d;
+}
+
+/* group()：畫「一行」——左邊一個小標籤文字，右邊放一整排 chip 按鈕（或輸入框） */
+function group(label, children){
+  const g=document.createElement("div"); g.className="grp";
+  const l=document.createElement("div"); l.className="gl"; l.textContent=label;
+  const b=document.createElement("div"); b.className="gb";
+  children.forEach(x=>b.appendChild(x));
+  g.appendChild(l); g.appendChild(b);
+  return g;
+}
+
+/* freeInput()：畫一個小小的自由輸入框，通常接在一排 chip 後面，用來補充按鈕沒有的細節 */
+function freeInput(getter, setter, placeholder){
+  const i=document.createElement("input");
+  i.type="text"; i.className="gfree";
+  i.placeholder = placeholder || "\u2026";
+  i.value = getter();
+  i.oninput = e=>{ setter(e.target.value); renderPreview(); renderRail(); };
+  return i;
+}
+
+/* renderEditor()：整個中間表單區的畫面，都是這個函式畫出來的。
+   它會先清空整個編輯區，然後照 Chief complaint → HPI → Past history →
+   Physical exam → Impression 的順序，依照目前選到的主訴 C 把對應的按鈕通通畫出來。
+   任何一個 chip 被點擊時，都會重新呼叫這個函式，所以畫面永遠跟 S 保持同步。 */
+function renderEditor(){
+  const C = COMPLAINTS[active];
+  const ed = el("editor");
+  const focused = document.activeElement;
+  const scroll = ed.scrollTop;
+  ed.innerHTML="";
+
+  /* --- Chief complaint 主訴欄位（含 OU/OD/OS，如果這個主訴有 laterality） --- */
+  const b1 = block("cc","Chief complaint");
+  if(C.laterality){
+    const latBtns = ["OU","OD","OS"].map(lat=>
+      chip(lat, S.laterality===lat, ()=>{ S.laterality = S.laterality===lat ? "" : lat; })
+    );
+    b1.appendChild(group("Laterality", latBtns));
+  }
+  const ccIn=document.createElement("input");
+  ccIn.type="text"; ccIn.placeholder=C.ccDefault||"chief complaint";
+  ccIn.value=S.ccText;
+  ccIn.oninput=e=>{ S.ccText=e.target.value; renderPreview(); renderRail(); };
+  b1.appendChild(ccIn);
+  ed.appendChild(b1);
+
+  /* --- HPI 現病史：依照目前主訴 C.hpi 裡定義的每一組，畫出對應的按鈕分組 --- */
+  const b2 = block("hpi","Present illness");
+  (C.hpi||[]).forEach(g=>{
+    if(!S.hpi[g.label]) S.hpi[g.label]=[];
+    const kids=(g.b||[]).map(lab=>
+      chip(lab, S.hpi[g.label].includes(lab), ()=>toggleIn(S.hpi[g.label], lab), g.flag)
+    );
+    if(g.free) kids.push(freeInput(()=>S.hpiX[g.label]||"", v=>{S.hpiX[g.label]=v;}, g.ph));
+    b2.appendChild(group(g.label, kids));
+  });
+
+  const negBtns=(C.negatives||[]).map(n=>
+    chip(n, S.negatives.has(n), ()=>{ S.negatives.has(n)?S.negatives.delete(n):S.negatives.add(n); })
+  );
+  b2.appendChild(group("Denied", negBtns));
+
+  const hpiFree=document.createElement("textarea");
+  hpiFree.placeholder="Extra narrative lines, appended as written.";
+  hpiFree.value=S.hpiFree;
+  hpiFree.oninput=e=>{ S.hpiFree=e.target.value; renderPreview(); renderRail(); };
+  b2.appendChild(hpiFree);
+  ed.appendChild(b2);
+
+  /* --- Past history 過去病史：藥物史 + 破傷風（僅外科）+ 該主訴的 phExtra + 其他自由輸入 --- */
+  const b3 = block("ph","Medication");
+  b3.appendChild(group("Medication", SHARED.meds.map(m=>
+    chip(m.t, S.meds.has(m.t), ()=>{ S.meds.has(m.t)?S.meds.delete(m.t):S.meds.add(m.t); }, m.flag)
+  )));
+  if(C.dept === "surg"){
+    b3.appendChild(group("Tetanus", SHARED.tetanus.map(t=>
+      chip(t, S.tetanus===t, ()=>{ S.tetanus = S.tetanus===t ? "" : t; })
+    )));
+  }
+  (C.phExtra||[]).forEach(g=>{
+    if(!S.phExtra[g.label]) S.phExtra[g.label]=[];
+    const kids=(g.b||[]).map(lab=>
+      chip(lab, S.phExtra[g.label].includes(lab), ()=>toggleIn(S.phExtra[g.label], lab), g.flag)
+    );
+    if(g.free) kids.push(freeInput(()=>S.phExtraX[g.label]||"", v=>{S.phExtraX[g.label]=v;}, g.ph));
+    b3.appendChild(group(g.label, kids));
+  });
+  const phFree=document.createElement("textarea");
+  phFree.placeholder="Other history — operations, specific drugs, other details.";
+  phFree.value=S.phFree;
+  phFree.oninput=e=>{ S.phFree=e.target.value; renderPreview(); renderRail(); };
+  b3.appendChild(phFree);
+  ed.appendChild(b3);
+
+  /* --- Physical exam 理學檢查：GCS（如果有） + 全身系統（除非 peSystems:false） + peExtra --- */
+  const b5 = block("pe","Physical examination");
+  const hint=document.createElement("div"); hint.className="hint";
+  hint.textContent="Nothing appears in the note until you click it. A system you did not examine stays out.";
+  b5.appendChild(hint);
+
+  if(C.gcs){
+    const gwrap=document.createElement("div"); gwrap.style.marginBottom="10px";
+    [["E",4],["V",5],["M",6]].forEach(([comp,max])=>{
+      const btns=[];
+      for(let i=1;i<=max;i++){
+        const val=String(i);
+        btns.push(chip(comp+i, S.gcs[comp]===val, ()=>{ S.gcs[comp]= S.gcs[comp]===val ? "" : val; }));
+      }
+      gwrap.appendChild(group("GCS "+comp, btns));
+    });
+    b5.appendChild(gwrap);
+  }
+
+  if(C.peSystems !== false){
+    const focus = new Set(C.peFocus||[]);
+    const ordered = [...PE_SYSTEMS].sort((a,b)=> (focus.has(b.key)?1:0)-(focus.has(a.key)?1:0));
+    ordered.forEach(sys=>{
+      if(!S.pe[sys.key]) S.pe[sys.key]=[];
+      const row=document.createElement("div"); row.className="pe";
+      const l=document.createElement("div"); l.className="pl"; l.textContent=sys.label;
+      const bw=document.createElement("div"); bw.className="pb";
+      const nb=chip("normal", S.pe[sys.key].includes(sys.normal), ()=>{
+        const arr=S.pe[sys.key];
+        if(arr.includes(sys.normal)) arr.splice(arr.indexOf(sys.normal),1);
+        else { arr.length=0; arr.push(sys.normal); }
+      });
+      nb.classList.add("norm");
+      bw.appendChild(nb);
+      sys.abn.forEach(a=>{
+        bw.appendChild(chip(a, S.pe[sys.key].includes(a), ()=>{
+          const arr=S.pe[sys.key];
+          const ni=arr.indexOf(sys.normal); if(ni>=0) arr.splice(ni,1);
+          toggleIn(arr,a);
+        }));
+      });
+      row.appendChild(l); row.appendChild(bw);
+      b5.appendChild(row);
+    });
+  }
+
+  (C.peExtra||[]).forEach(g=>{
+    if(!S.peExtra[g.label]) S.peExtra[g.label]=[];
+    const row=document.createElement("div"); row.className="pe";
+    const l=document.createElement("div"); l.className="pl"; l.textContent=g.label;
+    const bw=document.createElement("div"); bw.className="pb";
+    g.b.forEach(a=> bw.appendChild(chip(a, S.peExtra[g.label].includes(a), ()=>toggleIn(S.peExtra[g.label],a), g.flag)));
+    if(g.free) bw.appendChild(freeInput(()=>S.peExtraX[g.label]||"", v=>{S.peExtraX[g.label]=v;}, g.ph));
+    row.appendChild(l); row.appendChild(bw);
+    b5.appendChild(row);
+  });
+  ed.appendChild(b5);
+
+  /* --- Impression 臨床診斷／印象：故意不放按鈕，純打字，因為這段是醫師的判斷 --- */
+  const b6 = block("imp","Impression");
+  const impHint=document.createElement("div"); impHint.className="hint";
+  impHint.textContent="No buttons here on purpose. This is the part worth thinking about.";
+  b6.appendChild(impHint);
+  const impTa=document.createElement("textarea");
+  impTa.style.minHeight="76px";
+  impTa.placeholder="1.\n2.";
+  impTa.value=S.impression;
+  impTa.oninput=e=>{ S.impression=e.target.value; renderPreview(); renderRail(); };
+  b6.appendChild(impTa);
+  ed.appendChild(b6);
+
+  ed.scrollTop=scroll;
+}
+
+/* --- completeness rail：定義左側細長導覽條上有哪幾顆小方塊，
+   每一顆的 filled() 決定「這個區塊有沒有內容」，有的話方塊會變深色 --- */
+const RAIL_SECTIONS=[
+  {id:"cc",  tip:"Chief complaint", filled:()=> !!(S.ccText.trim()||COMPLAINTS[active].ccDefault)},
+  {id:"hpi", tip:"Present illness", filled:()=> Object.values(S.hpi).some(a=>a.length) || Object.values(S.hpiX).some(x=>x&&x.trim()) || S.negatives.size>0 || !!S.hpiFree.trim()},
+  {id:"ph",  tip:"Medication", filled:()=> S.meds.size>0 || !!S.tetanus || !!S.phFree.trim() || Object.values(S.phExtra).some(a=>a&&a.length) || Object.values(S.phExtraX).some(x=>x&&x.trim())},
+  {id:"pe",  tip:"Physical exam",   filled:()=> Object.values(S.pe).some(a=>a&&a.length) || Object.values(S.peExtra).some(a=>a&&a.length) || Object.values(S.peExtraX).some(x=>x&&x.trim()) || Object.values(S.gcs).some(x=>x)},
+  {id:"imp", tip:"Impression",      filled:()=> !!S.impression.trim()}
+];
+
+/* renderRail()：畫出左側導覽條的小方塊，並依 RAIL_SECTIONS 的 filled() 更新深淺色 */
+function renderRail(){
+  const r=el("rail");
+  if(!r.dataset.built){
+    r.innerHTML="";
+    RAIL_SECTIONS.forEach(sec=>{
+      const b=document.createElement("button");
+      b.type="button"; b.dataset.tip=sec.tip; b.dataset.sec=sec.id;
+      b.setAttribute("aria-label","Jump to "+sec.tip);
+      b.onclick=()=>{ const t=el("blk-"+sec.id); if(t) t.scrollIntoView({behavior:"smooth",block:"start"}); };
+      r.appendChild(b);
+    });
+    const cap=document.createElement("div");
+    cap.className="railcap"; cap.textContent="sections";
+    r.appendChild(cap);
+    r.dataset.built="1";
+  }
+  RAIL_SECTIONS.forEach(sec=>{
+    const b=r.querySelector('[data-sec="'+sec.id+'"]');
+    if(b) b.dataset.filled = sec.filled() ? "true":"false";
+  });
+}
+
+let lastText="";
+/* renderPreview()：呼叫 buildNote() 組出病歷文字，畫到右側黑底的預覽區，並更新字數 */
+function renderPreview(){
+  const sections = buildNote();
+  const body = el("pvbody");
+  const text = noteAsText();
+  const changed = text !== lastText;
+  lastText = text;
+
+  body.innerHTML="";
+  let any=false;
+  sections.forEach(([h,content])=>{
+    if(!content) return;
+    any=true;
+    const hd=document.createElement("span"); hd.className="sec"; hd.textContent=h+"\n";
+    body.appendChild(hd);
+    body.appendChild(document.createTextNode(content+"\n\n"));
+  });
+  if(!any){
+    const e=document.createElement("span");
+    e.className="empty";
+    e.textContent="Pick a department and chief complaint above, then start clicking. The note builds here.";
+    body.appendChild(e);
+  }
+
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  el("count").textContent = words + " words";
+  if(changed) body.scrollTop = body.scrollHeight;
+}
+
+function renderAll(){ renderDept(); renderStrip(); renderEditor(); renderPreview(); renderRail(); } // 把畫面全部重畫一次（切換主訴/科別、清空病歷時會用到）
+
+/* ============================================================
+   ACTIONS 按鈕動作與快捷鍵
+   ============================================================ */
+
+/* 複製按鈕：把目前組好的病歷文字複製到剪貼簿。
+   navigator.clipboard 是瀏覽器現代的複製 API；若因為權限等原因失敗（catch 裡），
+   就退而求其次，用「產生一個看不見的文字框、選取、執行舊式 execCommand 複製」的方式頂替 */
+el("copyBtn").onclick = async ()=>{
+  const btn=el("copyBtn");
+  const text=noteAsText();
+  try{
+    await navigator.clipboard.writeText(text);
+  }catch(err){
+    const ta=document.createElement("textarea");
+    ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); }
+    catch(e2){ btn.textContent="Copy failed — select the note and copy manually"; return; }
+    finally{ document.body.removeChild(ta); }
+  }
+  btn.textContent="Copied"; btn.classList.add("done");
+  setTimeout(()=>{ btn.textContent="Copy note"; btn.classList.remove("done"); }, 1200);
+};
+
+/* 清除按鈕：跳確認框後，把 S 整個歸零、重新畫面（開始看下一位病人） */
+el("clearBtn").onclick = ()=>{
+  if(!confirm("Clear everything and start a new patient?")) return;
+  S = blankState();
+  renderAll();
+  el("editor").scrollTop = 0;
+};
+
+/* 鍵盤快捷鍵：Ctrl+Enter 複製、Ctrl+Backspace 清除、Alt+1~9 切換主訴 */
+document.addEventListener("keydown", e=>{
+  const mod = e.ctrlKey || e.metaKey;
+  if(mod && e.key === "Enter"){ e.preventDefault(); el("copyBtn").click(); }
+  if(mod && e.key === "Backspace"){ e.preventDefault(); el("clearBtn").click(); }
+  if(e.altKey && /^[1-9]$/.test(e.key)){
+    const keys = deptKeys(dept);
+    const i = +e.key - 1;
+    if(keys[i] && keys[i]!==active){ e.preventDefault(); guarded(()=>{ active = keys[i]; }); }
+  }
+});
+
+renderAll(); // 網頁一開啟就先畫一次整個畫面
+</script>
+</body>
+</html>
